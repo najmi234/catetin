@@ -1,42 +1,48 @@
 # Deploy Catetin ke server produksi
 
-Asumsi: server Linux (Ubuntu/Debian) yang bisa diakses lewat SSH, punya domain, dan port 80/443 terbuka. Ganti `api.example.com` dengan subdomainmu dan `USER` dengan user Linux di server.
+Target: STB Armbian (Ubuntu 24.04, aarch64) di rumah, dibuka ke internet lewat **Cloudflare Tunnel** di `https://catetin.shrimpie.qzz.io`. Tidak perlu IP publik, port forwarding, atau Caddy — HTTPS ditangani Cloudflare.
 
-## 1. DNS
-
-Buat record **A** `api.example.com` → IP publik server. Cek dari laptop:
-
-```bash
-dig +short api.example.com   # harus menampilkan IP server
+```
+HP ──HTTPS──► Cloudflare ◄── cloudflared (STB) ──► http://localhost:3001 (Catetin)
+                                                    └► Postgres di Docker (127.0.0.1:5432)
 ```
 
-## 2. Siapkan server
+Semua perintah di bawah dijalankan **di STB**, kecuali disebut lain.
+
+## 1. Cloudflare Tunnel
+
+Di dashboard Cloudflare (Zero Trust → Networks → Tunnels), pada tunnel milik STB:
+
+- Connector berstatus **Healthy**.
+- Published application route: `catetin.shrimpie.qzz.io` → **`http://localhost:3001`** (HTTP, bukan HTTPS; Access tidak diaktifkan).
+
+Untuk proyek lain, tambahkan route baru dengan subdomain satu tingkat (`<proyek>.shrimpie.qzz.io`) ke port masing-masing.
+
+## 2. Node.js 24
 
 ```bash
-# Node.js 24
 curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
 sudo apt-get install -y nodejs git
 node -v   # v24.x
+```
 
-# Docker (lewati jika sudah ada)
-curl -fsSL https://get.docker.com | sudo sh
-sudo usermod -aG docker $USER   # lalu logout & login lagi
+Pastikan user bisa memakai Docker tanpa `sudo`:
 
-# Caddy (lewati jika sudah ada)
-sudo apt-get install -y caddy
+```bash
+docker ps || { sudo usermod -aG docker $USER; echo "Logout lalu login lagi"; }
 ```
 
 ## 3. Ambil kode
 
-Dari laptop, push repo ke Git (GitHub/GitLab privat), lalu di server:
-
 ```bash
 sudo mkdir -p /opt/catetin && sudo chown $USER: /opt/catetin
-git clone <url-repo> /opt/catetin
+git clone <url-repo-privat> /opt/catetin
 cd /opt/catetin
-# Hanya dependensi server — aplikasi mobile tidak perlu dipasang di server
+# Hanya dependensi server — aplikasi mobile tidak dipasang di STB
 npm ci -w @catetin/server -w @catetin/shared --include-workspace-root
 ```
+
+Tanpa repo Git, salin dari laptop: `rsync -av --exclude node_modules --exclude .env --exclude expanse-recorder --exclude expense-dashboard ~/catetin/ najmi@stbnajmi:/opt/catetin/`
 
 ## 4. Database
 
@@ -44,9 +50,10 @@ npm ci -w @catetin/server -w @catetin/shared --include-workspace-root
 cd /opt/catetin
 echo "POSTGRES_PASSWORD=$(openssl rand -hex 24)" > .env    # dibaca docker compose
 docker compose up -d --wait
+grep POSTGRES_PASSWORD .env                                 # dipakai di langkah 5
 ```
 
-Port database hanya terbuka di `127.0.0.1`, tidak bisa diakses dari internet.
+Container otomatis menyala lagi setelah STB restart. Port database hanya di `127.0.0.1`.
 
 ## 5. Konfigurasi server
 
@@ -55,27 +62,26 @@ cp apps/server/.env.example apps/server/.env
 nano apps/server/.env
 ```
 
-Isi minimal untuk produksi:
-
 ```
 NODE_ENV=production
 HOST=127.0.0.1
 PORT=3001
-DATABASE_URL=postgres://catetin:<POSTGRES_PASSWORD dari langkah 4>@127.0.0.1:5432/catetin
+DATABASE_URL=postgres://catetin:<POSTGRES_PASSWORD>@127.0.0.1:5432/catetin
 BETTER_AUTH_SECRET=<hasil: openssl rand -base64 48>
-BETTER_AUTH_URL=https://api.example.com
+BETTER_AUTH_URL=https://catetin.shrimpie.qzz.io
 TRUSTED_ORIGINS=catetin://
 OWNER_EMAIL=<email login kamu>
 OWNER_NAME=<nama kamu>
-EMAIL=<akun Gmail pengirim kode login & sumber email Mandiri>
+EMAIL=<akun Gmail: pengirim kode login & sumber email Mandiri>
 EMAIL_PASSWORD=<app password Gmail>
 GMAIL_ENABLED=true
 WA_ENABLED=true
 MY_LID=<LID WhatsApp kamu>      # atau MY_PHONE=628xxxx
 ```
 
-Di produksi `EMAIL`/`EMAIL_PASSWORD` **wajib**: kode login dikirim lewat email.
-App password Gmail: Google Account → Security → 2-Step Verification → App passwords.
+- Di produksi `EMAIL`/`EMAIL_PASSWORD` **wajib**: kode login dikirim lewat email.
+- App password Gmail: Google Account → Security → 2-Step Verification → App passwords.
+- `HOST=127.0.0.1` cukup: cloudflared berjalan di STB yang sama.
 
 ## 6. Jalankan pertama kali (scan QR WhatsApp)
 
@@ -87,8 +93,9 @@ npm start -w @catetin/server
 ```
 
 - Tunggu `API listening on http://127.0.0.1:3001`.
+- Di terminal lain (atau dari laptop): `curl https://catetin.shrimpie.qzz.io/api/health` → `{"status":"ok",...}`.
 - Scan QR yang muncul: WhatsApp → Perangkat tertaut → Tautkan perangkat.
-- Setelah log `connected`, kirim `!help` ke chat dirimu sendiri untuk mengetes.
+- Setelah log `connected`, kirim `!help` ke chat dirimu sendiri.
 - Tekan `Ctrl+C`. Sesi WhatsApp tersimpan di `apps/server/data/auth_session`.
 
 ## 7. Jalankan sebagai service
@@ -101,16 +108,11 @@ sudo systemctl enable --now catetin
 journalctl -u catetin -f        # lihat log, Ctrl+C untuk keluar
 ```
 
-## 8. HTTPS dengan Caddy
+Setelah ini Catetin menyala sendiri setiap STB dinyalakan.
 
-Tambahkan isi `deploy/Caddyfile` (ganti `api.example.com`) ke `/etc/caddy/Caddyfile`, lalu:
+## 8. Backup harian
 
-```bash
-sudo systemctl reload caddy
-curl https://api.example.com/api/health    # {"status":"ok",...}
-```
-
-## 9. Backup harian
+Penyimpanan STB (eMMC/SD) bisa rusak mendadak — **backup ke luar STB wajib**.
 
 ```bash
 sudo mkdir -p /var/backups/catetin && sudo chown $USER: /var/backups/catetin
@@ -120,20 +122,23 @@ crontab -e
 30 2 * * * /opt/catetin/deploy/backup.sh >> $HOME/catetin-backup.log 2>&1
 ```
 
-Sebaiknya salin `/var/backups/catetin` secara berkala ke luar server (laptop, Google Drive, dsb).
+Salin hasilnya ke luar STB secara berkala, misalnya dari laptop:
 
-## 10. APK Android
+```bash
+rsync -av najmi@stbnajmi:/var/backups/catetin/ ~/backup-catetin/
+```
 
-Di laptop:
+## 9. APK Android
 
-1. Ganti `EXPO_PUBLIC_API_URL` di `apps/mobile/eas.json` menjadi `https://api.example.com`.
-2. Build:
-   ```bash
-   cd apps/mobile
-   npx eas-cli@latest login            # akun Expo (gratis)
-   npx eas-cli@latest build --profile preview --platform android
-   ```
-3. Buka link hasil build di HP, unduh dan pasang APK-nya.
+Di laptop (URL produksi sudah diatur di `apps/mobile/eas.json`):
+
+```bash
+cd apps/mobile
+npx eas-cli@latest login            # akun Expo (gratis)
+npx eas-cli@latest build --profile preview --platform android
+```
+
+Buka link hasil build di HP, unduh dan pasang APK-nya.
 
 ## Update kode
 
@@ -146,9 +151,10 @@ sudo systemctl restart catetin    # migration database berjalan otomatis saat st
 
 ## Masalah umum
 
-| Gejala                    | Cek                                                                       |
-| ------------------------- | ------------------------------------------------------------------------- |
-| Service gagal start       | `journalctl -u catetin -n 50` — biasanya isi `.env`                       |
-| `curl https://...` gagal  | DNS sudah mengarah? Port 80/443 terbuka? `journalctl -u caddy -n 50`      |
-| Kode login tidak masuk    | `EMAIL`/`EMAIL_PASSWORD` benar? Cek folder spam                           |
-| WhatsApp minta scan ulang | Hentikan service, hapus `apps/server/data/auth_session`, ulangi langkah 6 |
+| Gejala                                      | Cek                                                                                                    |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Service gagal start                         | `journalctl -u catetin -n 50` — biasanya isi `.env`                                                    |
+| `https://catetin.shrimpie.qzz.io` error 502 | Catetin belum jalan (`systemctl status catetin`) atau Service URL tunnel bukan `http://localhost:3001` |
+| Error 1033 / tunnel tidak tersambung        | `systemctl status cloudflared` di STB                                                                  |
+| Kode login tidak masuk                      | `EMAIL`/`EMAIL_PASSWORD` benar? Cek folder spam                                                        |
+| WhatsApp minta scan ulang                   | Hentikan service, hapus `apps/server/data/auth_session`, ulangi langkah 6                              |

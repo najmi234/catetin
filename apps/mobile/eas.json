@@ -4,7 +4,7 @@
       "distribution": "internal",
       "android": { "buildType": "apk" },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://api.example.com"
+        "EXPO_PUBLIC_API_URL": "https://catetin.shrimpie.qzz.io"
       }
     }
   }
