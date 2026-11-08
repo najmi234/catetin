@@ -1,0 +1,22 @@
+# /etc/systemd/system/catetin.service
+# Ganti USER dan /opt/catetin sesuai server, lalu:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now catetin
+[Unit]
+Description=Catetin server (API, bot WhatsApp, Gmail)
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=USER
+# npm menjalankan script di folder workspace, jadi .env dibaca dari apps/server/.env
+WorkingDirectory=/opt/catetin
+ExecStart=/usr/bin/npm start -w @catetin/server
+Restart=always
+RestartSec=5
+# Beri waktu menutup koneksi WhatsApp dan database dengan rapi
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target

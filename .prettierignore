@@ -4,3 +4,4 @@ package-lock.json
 PLAN.md
 packages/shared/test/fixtures/
 apps/server/src/db/migrations/
+apps/mobile/expo-env.d.ts
