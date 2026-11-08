@@ -8,9 +8,12 @@ import {
 } from '@catetin/shared';
 import { and, asc, desc, eq, gte, ilike, lt, or, type SQL } from 'drizzle-orm';
 import type { Db } from '../db/client';
-import { categories, transactions } from '../db/schema';
+import { categories, pockets, transactions } from '../db/schema';
 import type { CategoryService } from './categories';
 import type { EventBus } from './events';
+import type { PocketService } from './pockets';
+
+type Badge = { id: string; name: string; color: string; icon: string };
 
 export interface TransactionView {
   id: string;
@@ -21,7 +24,8 @@ export interface TransactionView {
   note: string | null;
   occurredAt: Date;
   createdAt: Date;
-  category: { id: string; name: string; color: string; icon: string } | null;
+  category: Badge | null;
+  pocket: Badge | null;
 }
 
 /** Already validated by the zod schemas in @catetin/shared. */
@@ -30,20 +34,22 @@ export interface NewTransaction {
   amount: number;
   /** undefined = guess from the merchant history, null = explicitly none */
   categoryId?: string | null;
+  /** undefined = the category's pocket, null = explicitly none */
+  pocketId?: string | null;
   paymentMethod?: PaymentMethod;
   note?: string | null;
   occurredAt?: string | Date;
 }
 
-export type TransactionChanges = Partial<Omit<NewTransaction, 'categoryId'>> & {
-  categoryId?: string | null;
-};
+export type TransactionChanges = Partial<NewTransaction>;
 
 export interface QuickAddResult {
   created: TransactionView[];
   failed: { line: string; message: string }[];
   /** "#tags" that matched no category; those lines were saved without one. */
   unknownTags: string[];
+  /** "$tags" that matched no pocket; those lines fell back to the category's pocket. */
+  unknownPockets: string[];
   /** Lines skipped because their external id was already recorded. */
   duplicates: number;
 }
@@ -67,11 +73,24 @@ const viewColumns = {
   categoryName: categories.name,
   categoryColor: categories.color,
   categoryIcon: categories.icon,
+  pocketId: pockets.id,
+  pocketName: pockets.name,
+  pocketColor: pockets.color,
+  pocketIcon: pockets.icon,
 };
 
 type ViewRow = {
   [K in keyof typeof viewColumns]: (typeof viewColumns)[K]['_']['data'] | null;
 };
+
+function badge(
+  id: string | null,
+  name: string | null,
+  color: string | null,
+  icon: string | null,
+): Badge | null {
+  return id ? { id, name: name!, color: color!, icon: icon! } : null;
+}
 
 function toView(row: ViewRow): TransactionView {
   return {
@@ -83,14 +102,8 @@ function toView(row: ViewRow): TransactionView {
     note: row.note,
     occurredAt: row.occurredAt!,
     createdAt: row.createdAt!,
-    category: row.categoryId
-      ? {
-          id: row.categoryId,
-          name: row.categoryName!,
-          color: row.categoryColor!,
-          icon: row.categoryIcon!,
-        }
-      : null,
+    category: badge(row.categoryId, row.categoryName, row.categoryColor, row.categoryIcon),
+    pocket: badge(row.pocketId, row.pocketName, row.pocketColor, row.pocketIcon),
   };
 }
 
@@ -98,12 +111,18 @@ function escapeLike(s: string): string {
   return s.replace(/[\\%_]/g, '\\$&');
 }
 
-export function createTransactionService(db: Db, events: EventBus, cats: CategoryService) {
+export function createTransactionService(
+  db: Db,
+  events: EventBus,
+  cats: CategoryService,
+  pocketService: PocketService,
+) {
   async function select(where: SQL | undefined, order: 'asc' | 'desc' = 'desc') {
     const rows = await db
       .select(viewColumns)
       .from(transactions)
       .leftJoin(categories, eq(categories.id, transactions.categoryId))
+      .leftJoin(pockets, eq(pockets.id, transactions.pocketId))
       .where(where)
       .orderBy(
         order === 'desc' ? desc(transactions.occurredAt) : asc(transactions.occurredAt),
@@ -121,6 +140,15 @@ export function createTransactionService(db: Db, events: EventBus, cats: Categor
     if (categoryId && !(await cats.findOwned(userId, categoryId))) throw new InvalidCategoryError();
   }
 
+  /** The pocket a category draws from by default. */
+  async function pocketOfCategory(
+    userId: string,
+    categoryId: string | null,
+  ): Promise<string | null> {
+    if (!categoryId) return null;
+    return (await cats.findOwned(userId, categoryId))?.pocketId ?? null;
+  }
+
   /** Returns null when `externalId` was already recorded. */
   async function create(
     userId: string,
@@ -128,10 +156,13 @@ export function createTransactionService(db: Db, events: EventBus, cats: Categor
     meta: { channel: Channel; externalId?: string },
   ): Promise<TransactionView | null> {
     await assertCategory(userId, input.categoryId);
+    await pocketService.assertOwned(userId, input.pocketId);
     const categoryId =
       input.categoryId === undefined
         ? await cats.categoryForMerchant(userId, input.merchant)
         : input.categoryId;
+    const pocketId =
+      input.pocketId === undefined ? await pocketOfCategory(userId, categoryId) : input.pocketId;
 
     const [row] = await db
       .insert(transactions)
@@ -140,6 +171,7 @@ export function createTransactionService(db: Db, events: EventBus, cats: Categor
         merchant: input.merchant,
         amount: input.amount,
         categoryId,
+        pocketId,
         paymentMethod: input.paymentMethod ?? 'cash',
         note: input.note ?? null,
         occurredAt: input.occurredAt ? new Date(input.occurredAt) : new Date(),
@@ -175,6 +207,7 @@ export function createTransactionService(db: Db, events: EventBus, cats: Categor
             ilike(transactions.merchant, pattern),
             ilike(transactions.note, pattern),
             ilike(categories.name, pattern),
+            ilike(pockets.name, pattern),
           )!,
         );
       }
@@ -204,7 +237,14 @@ export function createTransactionService(db: Db, events: EventBus, cats: Categor
       changes: TransactionChanges,
     ): Promise<TransactionView | null> {
       await assertCategory(userId, changes.categoryId);
+      await pocketService.assertOwned(userId, changes.pocketId);
       const { occurredAt, ...rest } = changes;
+      // Moving an expense to another category moves it to that category's pocket,
+      // unless a pocket was chosen explicitly in the same change
+      if (changes.categoryId !== undefined && changes.pocketId === undefined) {
+        rest.pocketId = await pocketOfCategory(userId, changes.categoryId);
+      }
+
       const [row] = await db
         .update(transactions)
         .set({ ...rest, ...(occurredAt !== undefined && { occurredAt: new Date(occurredAt) }) })
@@ -257,7 +297,13 @@ export function createTransactionService(db: Db, events: EventBus, cats: Categor
         externalIdPrefix?: string;
       },
     ): Promise<QuickAddResult> {
-      const result: QuickAddResult = { created: [], failed: [], unknownTags: [], duplicates: 0 };
+      const result: QuickAddResult = {
+        created: [],
+        failed: [],
+        unknownTags: [],
+        unknownPockets: [],
+        duplicates: 0,
+      };
 
       for (const [index, line] of parseExpenseText(text).entries()) {
         if (!line.ok) {
@@ -265,12 +311,18 @@ export function createTransactionService(db: Db, events: EventBus, cats: Categor
           continue;
         }
 
-        const { merchant, amount, categoryTag, paymentMethod } = line.expense;
+        const { merchant, amount, categoryTag, paymentMethod, pocketTag } = line.expense;
         let categoryId: string | undefined;
         if (categoryTag) {
           const category = await cats.resolveTag(userId, categoryTag);
           if (category) categoryId = category.id;
           else result.unknownTags.push(categoryTag);
+        }
+        let pocketId: string | undefined;
+        if (pocketTag) {
+          const pocket = await pocketService.resolveTag(userId, pocketTag);
+          if (pocket) pocketId = pocket.id;
+          else result.unknownPockets.push(pocketTag);
         }
 
         const created = await create(
@@ -279,6 +331,7 @@ export function createTransactionService(db: Db, events: EventBus, cats: Categor
             merchant,
             amount,
             categoryId,
+            pocketId,
             paymentMethod: paymentMethod ?? options.defaultPaymentMethod ?? 'cash',
             occurredAt: options.occurredAt,
           },

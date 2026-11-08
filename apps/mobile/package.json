@@ -1,0 +1,48 @@
+{
+  "name": "@catetin/mobile",
+  "version": "1.0.0",
+  "private": true,
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "typecheck": "tsc --noEmit",
+    "doctor": "expo-doctor"
+  },
+  "dependencies": {
+    "@better-auth/expo": "^1.7.14",
+    "@catetin/shared": "^0.0.0",
+    "@react-native-community/datetimepicker": "9.2.1",
+    "@tanstack/react-query": "^5.105.0",
+    "better-auth": "^1.7.14",
+    "expo": "~58.0.23",
+    "expo-constants": "~58.0.14",
+    "expo-font": "~58.0.11",
+    "expo-linear-gradient": "~58.0.3",
+    "expo-linking": "~58.0.16",
+    "expo-network": "~58.0.4",
+    "expo-router": "~58.0.30",
+    "expo-secure-store": "~58.0.2",
+    "expo-splash-screen": "~58.0.13",
+    "expo-status-bar": "~58.0.4",
+    "expo-symbols": "~58.0.4",
+    "expo-system-ui": "~58.0.7",
+    "hono": "^4.13.14",
+    "lucide-react-native": "^1.65.0",
+    "react": "19.3.0",
+    "react-native": "0.88.1",
+    "react-native-gesture-handler": "~3.3.0",
+    "react-native-gifted-charts": "^1.4.81",
+    "react-native-reanimated": "4.7.1",
+    "react-native-safe-area-context": "~5.11.1",
+    "react-native-screens": "~4.30.0",
+    "react-native-sse": "^1.2.1",
+    "react-native-svg": "15.16.0",
+    "react-native-worklets": "0.13.0"
+  },
+  "devDependencies": {
+    "@catetin/server": "^0.0.0",
+    "@types/react": "~19.3.0",
+    "typescript": "~6.0.3"
+  }
+}

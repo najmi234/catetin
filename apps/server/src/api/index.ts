@@ -1,5 +1,8 @@
 import {
   categoryInputSchema,
+  pocketInputSchema,
+  pocketTopUpSchema,
+  pocketTransferSchema,
   quickAddSchema,
   transactionCreateSchema,
   transactionListQuerySchema,
@@ -18,6 +21,7 @@ import type { Logger } from '../logger';
 import type { Services } from '../services';
 import { CategoryNameTakenError } from '../services/categories';
 import type { AppEvent } from '../services/events';
+import { InvalidPocketError, PocketNameTakenError } from '../services/pockets';
 import { InvalidCategoryError } from '../services/transactions';
 
 export interface ApiDeps {
@@ -78,7 +82,8 @@ export function createApp(deps: ApiDeps) {
         channel: 'app',
         occurredAt,
       });
-      return c.json({ data: result }, result.created.length > 0 ? 201 : 422);
+      // Lines that could not be parsed are reported in the body, not as an HTTP error
+      return c.json({ data: result }, 200);
     })
     .get('/:id', validate('param', idParam), async (c) => {
       const data = await services.transactions.get(c.get('userId'), c.req.valid('param').id);
@@ -134,9 +139,82 @@ export function createApp(deps: ApiDeps) {
       return c.json({ success: true });
     });
 
+  const pocketRoutes = new Hono<Env>()
+    .get('/', async (c) => c.json({ data: await services.pockets.list(c.get('userId')) }))
+    .post('/', validate('json', pocketInputSchema), async (c) => {
+      const data = await services.pockets.create(c.get('userId'), c.req.valid('json'));
+      return c.json({ data }, 201);
+    })
+    // Before "/:id" so "transfer" is not read as an id
+    .post('/transfer', validate('json', pocketTransferSchema), async (c) => {
+      const data = await services.pockets.transfer(c.get('userId'), c.req.valid('json'));
+      return c.json({ data }, 201);
+    })
+    .delete('/entries/:id', validate('param', idParam), async (c) => {
+      const deleted = await services.pockets.removeEntry(c.get('userId'), c.req.valid('param').id);
+      if (!deleted) return c.json({ error: 'Catatan saldo tidak ditemukan' }, 404);
+      return c.json({ success: true });
+    })
+    .get('/:id', validate('param', idParam), async (c) => {
+      const data = await services.pockets.get(c.get('userId'), c.req.valid('param').id);
+      if (!data) return c.json({ error: 'Kantong tidak ditemukan' }, 404);
+      return c.json({ data });
+    })
+    .get(
+      '/:id/activity',
+      validate('param', idParam),
+      validate('query', z.object({ month: yearMonthSchema })),
+      async (c) => {
+        const userId = c.get('userId');
+        const { id } = c.req.valid('param');
+        if (!(await services.pockets.get(userId, id))) {
+          return c.json({ error: 'Kantong tidak ditemukan' }, 404);
+        }
+        const data = await services.pockets.activity(userId, id, c.req.valid('query').month);
+        return c.json({ data });
+      },
+    )
+    .post(
+      '/:id/topup',
+      validate('param', idParam),
+      validate('json', pocketTopUpSchema),
+      async (c) => {
+        const data = await services.pockets.topUp(
+          c.get('userId'),
+          c.req.valid('param').id,
+          c.req.valid('json'),
+        );
+        if (!data) return c.json({ error: 'Kantong tidak ditemukan' }, 404);
+        return c.json({ data }, 201);
+      },
+    )
+    .patch(
+      '/:id',
+      validate('param', idParam),
+      validate(
+        'json',
+        pocketInputSchema.partial().extend({ sortOrder: z.number().int().min(0).optional() }),
+      ),
+      async (c) => {
+        const data = await services.pockets.update(
+          c.get('userId'),
+          c.req.valid('param').id,
+          c.req.valid('json'),
+        );
+        if (!data) return c.json({ error: 'Kantong tidak ditemukan' }, 404);
+        return c.json({ data });
+      },
+    )
+    .delete('/:id', validate('param', idParam), async (c) => {
+      const deleted = await services.pockets.remove(c.get('userId'), c.req.valid('param').id);
+      if (!deleted) return c.json({ error: 'Kantong tidak ditemukan' }, 404);
+      return c.json({ success: true });
+    });
+
   const routes = new Hono<Env>()
     .route('/transactions', transactionRoutes)
     .route('/categories', categoryRoutes)
+    .route('/pockets', pocketRoutes)
     .get('/summary', validate('query', z.object({ month: yearMonthSchema })), async (c) => {
       const data = await services.summary.month(c.get('userId'), c.req.valid('query').month);
       return c.json({ data });
@@ -209,6 +287,8 @@ export function createApp(deps: ApiDeps) {
     if (err instanceof HTTPException) return err.getResponse();
     if (err instanceof InvalidCategoryError) return c.json({ error: err.message }, 400);
     if (err instanceof CategoryNameTakenError) return c.json({ error: err.message }, 409);
+    if (err instanceof InvalidPocketError) return c.json({ error: err.message }, 400);
+    if (err instanceof PocketNameTakenError) return c.json({ error: err.message }, 409);
     logger.error({ err, path: c.req.path }, 'unhandled API error');
     return c.json({ error: 'Terjadi kesalahan di server' }, 500);
   });

@@ -37,8 +37,14 @@ export type Config = z.infer<typeof envSchema>;
 
 export function loadConfig(): Config {
   if (existsSync('.env')) process.loadEnvFile('.env');
+  return parseConfig(process.env);
+}
 
-  const parsed = envSchema.safeParse(process.env);
+export function parseConfig(env: Record<string, string | undefined>): Config {
+  // ".env.example" leaves optional keys blank ("EMAIL="); blank means "not set"
+  const present = Object.fromEntries(Object.entries(env).filter(([, value]) => value !== ''));
+
+  const parsed = envSchema.safeParse(present);
   if (!parsed.success) {
     const issues = parsed.error.issues.map((i) => `  - ${i.path.join('.')}: ${i.message}`);
     throw new Error(`Konfigurasi .env tidak valid:\n${issues.join('\n')}`);

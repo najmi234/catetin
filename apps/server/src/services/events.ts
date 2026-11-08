@@ -4,7 +4,8 @@ export type AppEvent =
   | { type: 'transaction.created'; id: string }
   | { type: 'transaction.updated'; id: string }
   | { type: 'transaction.deleted'; id: string }
-  | { type: 'categories.changed' };
+  | { type: 'categories.changed' }
+  | { type: 'pockets.changed' };
 
 type Listener = (event: AppEvent) => void;
 

@@ -57,5 +57,6 @@ describe('formatRupiah', () => {
     expect(formatRupiah(15_000)).toBe('Rp 15.000');
     expect(formatRupiah(1_250_000)).toBe('Rp 1.250.000');
     expect(formatRupiah(500)).toBe('Rp 500');
+    expect(formatRupiah(-20_000)).toBe('-Rp 20.000');
   });
 });

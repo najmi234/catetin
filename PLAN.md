@@ -94,14 +94,14 @@ catetin/
 ### Bersama
 - Node.js 24 LTS (dikunci lewat `.nvmrc` dan `engines` di `package.json`), TypeScript, npm workspaces
 - `zod` untuk validasi dan tipe yang dipakai bersama oleh server dan mobile
-- `date-fns` + `@date-fns/tz` untuk perhitungan zona waktu `Asia/Jakarta`
+- Zona waktu `Asia/Jakarta` dihitung dengan offset tetap UTC+7 (WIB tidak punya DST), tanpa library — hasilnya sama di Node dan Hermes
 - `vitest` untuk test, ESLint + Prettier untuk kualitas kode
 
 ### Server (`apps/server`)
 | Kebutuhan | Library |
 |---|---|
 | HTTP API | `hono` + `@hono/node-server` + `@hono/zod-validator` |
-| Database | PostgreSQL (image Docker resmi, versi stabil terbaru) |
+| Database | PostgreSQL 17 (image Docker resmi `postgres:17-alpine`, didukung sampai Nov 2029) |
 | Driver & ORM | `postgres` (postgres.js) + `drizzle-orm` + `drizzle-kit` |
 | DB untuk test | `@electric-sql/pglite` (Postgres in-memory, tanpa Docker) |
 | Login | `better-auth` (plugin email OTP + plugin Expo) |
@@ -116,15 +116,15 @@ catetin/
 ### Mobile (`apps/mobile`)
 | Kebutuhan | Library |
 |---|---|
-| Framework | Expo SDK (versi terbaru) + Expo Router |
+| Framework | Expo SDK 58 + Expo Router (`NativeTabs`, `Stack.Protected`) |
 | API client | `hono/client` (tipe request/response otomatis dari server) + TanStack Query |
 | Login | `better-auth` Expo client + `expo-secure-store` |
 | Pembaruan langsung | SSE (`react-native-sse`) yang memicu refresh data di TanStack Query |
-| Form | `react-hook-form` + `zod` |
-| UI | NativeWind, `lucide-react-native`, `@gorhom/bottom-sheet` |
+| Form | State React biasa + parser/validasi dari `@catetin/shared` |
+| UI | `StyleSheet` + token tema sendiri (`src/theme.ts`, mode terang/gelap), `lucide-react-native`, modal Expo Router |
+| Tanggal | `@react-native-community/datetimepicker` (dikunci ke WIB) |
 | Grafik | `react-native-gifted-charts` + `react-native-svg` |
-| Gestur | `react-native-gesture-handler` + `react-native-reanimated` |
-| Notifikasi | `expo-notifications` |
+| Notifikasi | `expo-notifications` (Fase 5) |
 | Build | EAS Build menghasilkan APK (distribusi internal) |
 
 ---
@@ -267,14 +267,26 @@ Pendaftaran akun dibatasi ke email di `OWNER_EMAIL`, karena aplikasi ini untuk s
 **Selesai bila:** pesan WA dan email Mandiri sama-sama tersimpan ke Postgres lokal.
 
 ### Fase 3 — Aplikasi mobile (MVP)
-- [ ] Buat proyek Expo, pasang Expo Router dan NativeWind, siapkan tema
-- [ ] Klien Better Auth dan alur login
-- [ ] Klien Hono RPC dengan hook TanStack Query
-- [ ] Layar Dashboard, Riwayat, Tambah, dan Pengaturan
-- [ ] Koneksi SSE yang memicu refresh data
-- [ ] Development build (`expo-dev-client`) di HP Android
+- [x] Buat proyek Expo SDK 58 (Android saja), Expo Router, tema terang/gelap. NativeWind diganti `StyleSheet` karena versi stabilnya belum pasti cocok dengan SDK 58.
+- [x] Klien Better Auth dan alur login OTP (`Stack.Protected`)
+- [x] Klien Hono RPC dengan hook TanStack Query; sesi kedaluwarsa (401) otomatis kembali ke login
+- [x] Layar Beranda (catat cepat + pratinjau, ringkasan, grafik harian, per kategori, terbaru), Riwayat (per hari, pencarian), Tambah/Ubah transaksi, Pengaturan (kelola kategori, keluar)
+- [x] Koneksi SSE yang memicu refresh data; ditutup saat aplikasi di background, refetch saat kembali
+- [x] Lint (termasuk aturan React Hooks), typecheck, bundle Android (`expo export`), `expo-doctor` 20/20
+- [ ] Uji di HP Android lewat Expo Go (semua library MVP ada di Expo Go; development build baru dibutuhkan di Fase 6)
+
+Catatan: edit/hapus memakai ketuk → layar ubah (bukan swipe), dan form memakai modal Expo Router (bukan bottom sheet) agar tidak bergantung pada library tambahan.
 
 **Selesai bila:** semua fitur dashboard web lama tersedia di HP.
+
+### Fase 3b — Kantong (amplop virtual) ✅
+- [x] Tabel `pockets` dan `pocket_entries` (isi saldo, pindahan masuk/keluar); kolom `pocket_id` di `categories` dan `transactions`
+- [x] Saldo selalu dihitung: total isi/pindahan − total pengeluaran di kantong itu (boleh minus)
+- [x] Pengeluaran otomatis masuk ke kantong milik kategorinya; bisa dipilih manual di form atau `$kantong` di WA/catat cepat
+- [x] Isi saldo manual, pindah saldo antar kantong, batalkan isi/pindahan
+- [x] WA: `!kantong`, `!isi <kantong> <nominal>`, `!pindah <dari> <ke> <nominal>`, sisa saldo + peringatan minus di setiap balasan
+- [x] Aplikasi: tab Kantong (kartu + total saldo), detail kantong dengan riwayat per bulan, form kantong, pilihan kantong di form kategori & transaksi
+- [ ] Uji di HP
 
 ### Fase 4 — Deploy & migrasi
 - [ ] Server: unit systemd, file `.env`, folder `data/`

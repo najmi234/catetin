@@ -19,6 +19,7 @@ describe('parseExpenseLine', () => {
       amount: 15_000,
       categoryTag: null,
       paymentMethod: null,
+      pocketTag: null,
     });
   });
 
@@ -49,6 +50,15 @@ describe('parseExpenseLine', () => {
     });
   });
 
+  it('reads a $pocket tag', () => {
+    expect(expense(parseExpenseLine('servis motor 150rb $Servis #transport'))).toMatchObject({
+      merchant: 'servis motor',
+      amount: 150_000,
+      categoryTag: 'transport',
+      pocketTag: 'servis',
+    });
+  });
+
   it.each([
     ['tunai', 'cash'],
     ['tf', 'transfer'],
@@ -69,6 +79,7 @@ describe('parseExpenseLine', () => {
     ['kopi 15k @bitcoin', 'unknown_payment_method'],
     ['kopi 15k #makan #minum', 'multiple_categories'],
     ['kopi 15k @qris @cash', 'multiple_payment_methods'],
+    ['kopi 15k $jajan $bensin', 'multiple_pockets'],
   ])('%j → %s', (line, error) => {
     expect(parseExpenseLine(line)).toMatchObject({ ok: false, error });
   });

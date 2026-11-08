@@ -12,7 +12,6 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@date-fns/tz": "^1.5.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {

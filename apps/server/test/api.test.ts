@@ -124,7 +124,7 @@ describe('/api/transactions', () => {
       method: 'POST',
       body: { text: 'kopi 15k #makan\nbensin 50rb @qris\nxxx' },
     });
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(200);
     const { data } = await res.json();
     expect(data.created).toHaveLength(2);
     expect(data.failed).toEqual([{ line: 'xxx', message: expect.stringContaining('Nominal') }]);
@@ -133,7 +133,8 @@ describe('/api/transactions', () => {
       method: 'POST',
       body: { text: 'halo' },
     });
-    expect(nothing.status).toBe(422);
+    expect(nothing.status).toBe(200);
+    expect((await nothing.json()).data.created).toEqual([]);
   });
 });
 

@@ -1,6 +1,8 @@
 services:
   postgres:
-    image: postgres:18
+    # 17 (supported until Nov 2029). Moving to 18 later needs a dump/restore and the
+    # volume mounted at /var/lib/postgresql instead of .../data.
+    image: postgres:17-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: catetin
@@ -11,7 +13,7 @@ services:
       # Never expose the database beyond this machine
       - '127.0.0.1:5432:5432'
     volumes:
-      - pgdata:/var/lib/postgresql
+      - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U catetin -d catetin']
       interval: 5s

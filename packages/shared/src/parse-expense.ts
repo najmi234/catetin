@@ -8,6 +8,8 @@ export interface ParsedExpense {
   categoryTag: string | null;
   /** null when the line has no "@method"; the caller picks the default. */
   paymentMethod: PaymentMethod | null;
+  /** Lowercased tag without "$", resolved to a pocket by the server. */
+  pocketTag: string | null;
 }
 
 export type ParseError =
@@ -16,7 +18,8 @@ export type ParseError =
   | 'missing_merchant'
   | 'unknown_payment_method'
   | 'multiple_categories'
-  | 'multiple_payment_methods';
+  | 'multiple_payment_methods'
+  | 'multiple_pockets';
 
 export type LineResult =
   | { ok: true; line: string; expense: ParsedExpense }
@@ -46,12 +49,13 @@ const PAYMENT_ALIASES: Record<string, PaymentMethod> = {
 const LINE_RE = new RegExp(String.raw`^(.*\S)\s+(${AMOUNT_PATTERN})$`, 'i');
 
 /**
- * Parse one expense line: "<merchant> <amount> [#category] [@method]".
+ * Parse one expense line: "<merchant> <amount> [#category] [@method] [$pocket]".
  * Tags may appear anywhere in the line.
  *
  *   "kopi 15k"                  → kopi, 15.000
  *   "bensin 50rb #transport"    → bensin, 50.000, tag "transport"
  *   "makan siang 32.500 @qris"  → makan siang, 32.500, qris
+ *   "servis 150rb $servis"      → servis, 150.000, pocket tag "servis"
  */
 export function parseExpenseLine(input: string): LineResult {
   const line = input.trim();
@@ -60,15 +64,17 @@ export function parseExpenseLine(input: string): LineResult {
   const words: string[] = [];
   const categoryTags: string[] = [];
   const methodTags: string[] = [];
+  const pocketTags: string[] = [];
+  const tagLists: Record<string, string[]> = { '#': categoryTags, '@': methodTags, $: pocketTags };
   for (const token of line.split(/\s+/)) {
-    if (token.length > 1 && token.startsWith('#')) categoryTags.push(token.slice(1).toLowerCase());
-    else if (token.length > 1 && token.startsWith('@'))
-      methodTags.push(token.slice(1).toLowerCase());
+    const list = token.length > 1 ? tagLists[token[0]!] : undefined;
+    if (list) list.push(token.slice(1).toLowerCase());
     else words.push(token);
   }
 
   if (categoryTags.length > 1) return fail('multiple_categories');
   if (methodTags.length > 1) return fail('multiple_payment_methods');
+  if (pocketTags.length > 1) return fail('multiple_pockets');
 
   let paymentMethod: PaymentMethod | null = null;
   if (methodTags[0] !== undefined) {
@@ -93,7 +99,13 @@ export function parseExpenseLine(input: string): LineResult {
   return {
     ok: true,
     line,
-    expense: { merchant, amount, categoryTag: categoryTags[0] ?? null, paymentMethod },
+    expense: {
+      merchant,
+      amount,
+      categoryTag: categoryTags[0] ?? null,
+      paymentMethod,
+      pocketTag: pocketTags[0] ?? null,
+    },
   };
 }
 
@@ -123,6 +135,7 @@ const ERROR_MESSAGES: Record<ParseError, string> = {
     'Metode bayar tidak dikenali. Gunakan @cash, @qris, @debit, @ewallet, @transfer, atau @lainnya.',
   multiple_categories: 'Gunakan satu #kategori saja per baris.',
   multiple_payment_methods: 'Gunakan satu @metode saja per baris.',
+  multiple_pockets: 'Gunakan satu $kantong saja per baris.',
 };
 
 export function describeParseError(error: ParseError): string {

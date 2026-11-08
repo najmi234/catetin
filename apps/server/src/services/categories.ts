@@ -3,6 +3,7 @@ import { and, asc, eq, sql } from 'drizzle-orm';
 import type { Db } from '../db/client';
 import { categories, merchantRules } from '../db/schema';
 import type { EventBus } from './events';
+import type { PocketService } from './pockets';
 
 export type Category = typeof categories.$inferSelect;
 
@@ -22,6 +23,19 @@ function normalizeName(name: string): string {
   return name.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 }
 
+/**
+ * Resolve a typed tag to a named item: exact normalized name first, then a unique prefix
+ * ("makan" → "Makanan & Minuman"). Null when unknown or ambiguous.
+ */
+export function matchByName<T extends { name: string }>(items: T[], tag: string): T | null {
+  const wanted = normalizeName(tag);
+  if (!wanted) return null;
+  const exact = items.find((item) => normalizeName(item.name) === wanted);
+  if (exact) return exact;
+  const prefixed = items.filter((item) => normalizeName(item.name).startsWith(wanted));
+  return prefixed.length === 1 ? prefixed[0]! : null;
+}
+
 /** Key for remembering a merchant's category: "  KOPI  Kenangan!" → "kopi kenangan". */
 export function merchantKey(merchant: string): string {
   return merchant
@@ -37,7 +51,7 @@ export class CategoryNameTakenError extends Error {
   }
 }
 
-export function createCategoryService(db: Db, events: EventBus) {
+export function createCategoryService(db: Db, events: EventBus, pockets: PocketService) {
   async function list(userId: string): Promise<Category[]> {
     return db
       .select()
@@ -75,6 +89,7 @@ export function createCategoryService(db: Db, events: EventBus) {
     },
 
     async create(userId: string, input: CategoryInput): Promise<Category> {
+      await pockets.assertOwned(userId, input.pocketId);
       const [{ next } = { next: 0 }] = await db
         .select({ next: sql<number>`coalesce(max(${categories.sortOrder}), -1)::int + 1` })
         .from(categories)
@@ -94,6 +109,7 @@ export function createCategoryService(db: Db, events: EventBus) {
       id: string,
       input: Partial<CategoryInput> & { sortOrder?: number },
     ): Promise<Category | null> {
+      await pockets.assertOwned(userId, input.pocketId);
       const [row] = await guardUniqueName(() =>
         db
           .update(categories)
@@ -115,18 +131,9 @@ export function createCategoryService(db: Db, events: EventBus) {
       return deleted.length > 0;
     },
 
-    /**
-     * Resolve a "#tag" to a category: exact normalized name first, then a unique prefix
-     * ("#makan" → "Makanan & Minuman"). Returns null when unknown or ambiguous.
-     */
+    /** Resolve a "#tag" to a category, see matchByName. */
     async resolveTag(userId: string, tag: string): Promise<Category | null> {
-      const wanted = normalizeName(tag);
-      if (!wanted) return null;
-      const all = await list(userId);
-      const exact = all.find((c) => normalizeName(c.name) === wanted);
-      if (exact) return exact;
-      const prefixed = all.filter((c) => normalizeName(c.name).startsWith(wanted));
-      return prefixed.length === 1 ? prefixed[0]! : null;
+      return matchByName(await list(userId), tag);
     },
 
     async categoryForMerchant(userId: string, merchant: string): Promise<string | null> {

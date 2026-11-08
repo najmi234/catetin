@@ -57,7 +57,7 @@ function parsePlainNumber(s: string): number | null {
 
 const rupiahFormat = new Intl.NumberFormat('id-ID', { maximumFractionDigits: 0 });
 
-/** 15000 → "Rp 15.000" */
+/** 15000 → "Rp 15.000", -20000 → "-Rp 20.000" */
 export function formatRupiah(amount: number): string {
-  return `Rp ${rupiahFormat.format(amount)}`;
+  return amount < 0 ? `-Rp ${rupiahFormat.format(-amount)}` : `Rp ${rupiahFormat.format(amount)}`;
 }

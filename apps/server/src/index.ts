@@ -22,9 +22,13 @@ const auth = createAuth({
   db,
   secret: config.BETTER_AUTH_SECRET,
   baseURL: config.BETTER_AUTH_URL,
-  trustedOrigins: config.TRUSTED_ORIGINS.split(',')
-    .map((o) => o.trim())
-    .filter(Boolean),
+  trustedOrigins: [
+    ...config.TRUSTED_ORIGINS.split(',')
+      .map((o) => o.trim())
+      .filter(Boolean),
+    // Expo Go during development
+    ...(config.NODE_ENV === 'development' ? ['exp://', 'exp://**'] : []),
+  ],
   ownerEmail: config.OWNER_EMAIL,
   sendOtp: createOtpSender(
     {

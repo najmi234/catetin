@@ -79,6 +79,58 @@ export const verification = pgTable('verification', {
 export const paymentMethod = pgEnum('payment_method', PAYMENT_METHODS);
 export const channel = pgEnum('channel', CHANNELS);
 
+/**
+ * Virtual envelopes. A pocket stores no balance: it is always
+ * sum(pocket_entries.amount) − sum(transactions.amount) for the pocket, so editing or
+ * deleting an expense can never leave a balance out of sync.
+ */
+export const pockets = pgTable(
+  'pockets',
+  {
+    id: uuid().primaryKey().$defaultFn(uuidv7),
+    userId: text()
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    name: text().notNull(),
+    color: text().notNull().default('#f59e0b'),
+    icon: text().notNull().default('wallet'),
+    sortOrder: integer().notNull().default(0),
+    ...timestamps,
+  },
+  (t) => [unique('pockets_user_name_key').on(t.userId, t.name)],
+);
+
+export const pocketEntryKind = pgEnum('pocket_entry_kind', [
+  'topup',
+  'transfer_in',
+  'transfer_out',
+]);
+
+/** Money put into (positive) or moved out of (negative) a pocket. Expenses live in transactions. */
+export const pocketEntries = pgTable(
+  'pocket_entries',
+  {
+    id: uuid().primaryKey().$defaultFn(uuidv7),
+    userId: text()
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    pocketId: uuid()
+      .notNull()
+      .references(() => pockets.id, { onDelete: 'cascade' }),
+    kind: pocketEntryKind().notNull(),
+    amount: bigint({ mode: 'number' }).notNull(),
+    /** Both halves of a transfer share this id, so they are undone together. */
+    transferId: uuid(),
+    note: text(),
+    occurredAt: timestamp({ withTimezone: true }).notNull().defaultNow(),
+    ...timestamps,
+  },
+  (t) => [
+    index('pocket_entries_pocket_idx').on(t.pocketId, t.occurredAt.desc()),
+    check('pocket_entries_amount_nonzero', sql`${t.amount} <> 0`),
+  ],
+);
+
 export const categories = pgTable(
   'categories',
   {
@@ -90,6 +142,8 @@ export const categories = pgTable(
     color: text().notNull().default('#64748b'),
     icon: text().notNull().default('tag'),
     sortOrder: integer().notNull().default(0),
+    /** Expenses in this category are taken from this pocket unless chosen otherwise. */
+    pocketId: uuid().references(() => pockets.id, { onDelete: 'set null' }),
     ...timestamps,
   },
   (t) => [unique('categories_user_name_key').on(t.userId, t.name)],
@@ -105,6 +159,7 @@ export const transactions = pgTable(
     merchant: text().notNull(),
     amount: bigint({ mode: 'number' }).notNull(),
     categoryId: uuid().references(() => categories.id, { onDelete: 'set null' }),
+    pocketId: uuid().references(() => pockets.id, { onDelete: 'set null' }),
     paymentMethod: paymentMethod().notNull().default('cash'),
     channel: channel().notNull(),
     note: text(),
@@ -115,6 +170,7 @@ export const transactions = pgTable(
   },
   (t) => [
     index('transactions_user_occurred_idx').on(t.userId, t.occurredAt.desc()),
+    index('transactions_pocket_idx').on(t.pocketId),
     check('transactions_amount_positive', sql`${t.amount} > 0`),
   ],
 );

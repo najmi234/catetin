@@ -5,17 +5,20 @@ import { user } from '../db/schema';
 import { createAppStateService } from './app-state';
 import { createCategoryService } from './categories';
 import { EventBus } from './events';
+import { createPocketService } from './pockets';
 import { createSummaryService } from './summary';
 import { createTransactionService } from './transactions';
 
 export function createServices(db: Db) {
   const events = new EventBus();
-  const categories = createCategoryService(db, events);
+  const pockets = createPocketService(db, events);
+  const categories = createCategoryService(db, events, pockets);
   return {
     events,
     appState: createAppStateService(db),
+    pockets,
     categories,
-    transactions: createTransactionService(db, events, categories),
+    transactions: createTransactionService(db, events, categories, pockets),
     summary: createSummaryService(db),
 
     /**

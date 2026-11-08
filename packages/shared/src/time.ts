@@ -1,7 +1,10 @@
-import { TZDate } from '@date-fns/tz';
-
 /** All day/month boundaries in the app are computed in WIB. */
 export const APP_TIME_ZONE = 'Asia/Jakarta';
+
+// WIB is a fixed UTC+7 with no daylight saving (none since 1964), so plain offset
+// arithmetic is exact — and avoids depending on Intl time-zone support, which
+// varies between JavaScript engines (Hermes on Android in particular).
+const WIB_OFFSET_MS = 7 * 60 * 60 * 1000;
 
 export interface DateRange {
   /** Inclusive. */
@@ -15,6 +18,8 @@ export interface ZonedParts {
   /** 1-12 */
   month: number;
   day: number;
+  /** 0 = Sunday … 6 = Saturday */
+  weekday: number;
   hour: number;
   minute: number;
 }
@@ -34,9 +39,16 @@ export function daysInMonth(year: number, month: number): number {
   return new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
 
-function wibMidnight(year: number, month: number, day: number): Date {
-  // Month/day overflow rolls over like Date (month 13 → January next year).
-  return new Date(new TZDate(year, month - 1, day, APP_TIME_ZONE).getTime());
+/** The instant of 00:00 WIB on a calendar date. Overflow rolls over like Date (month 13 → January). */
+export function wibMidnight(year: number, month: number, day: number): Date {
+  return new Date(Date.UTC(year, month - 1, day) - WIB_OFFSET_MS);
+}
+
+/** The instant of a WIB wall-clock time. */
+export function fromWibParts(parts: Omit<ZonedParts, 'weekday'>): Date {
+  return new Date(
+    Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute) - WIB_OFFSET_MS,
+  );
 }
 
 /** The instant range covering a whole WIB month. */
@@ -57,13 +69,14 @@ export function dayRange(year: number, month: number, day: number): DateRange | 
 
 /** Calendar fields of an instant as seen in WIB. */
 export function toZonedParts(date: Date): ZonedParts {
-  const zoned = new TZDate(date.getTime(), APP_TIME_ZONE);
+  const shifted = new Date(date.getTime() + WIB_OFFSET_MS);
   return {
-    year: zoned.getFullYear(),
-    month: zoned.getMonth() + 1,
-    day: zoned.getDate(),
-    hour: zoned.getHours(),
-    minute: zoned.getMinutes(),
+    year: shifted.getUTCFullYear(),
+    month: shifted.getUTCMonth() + 1,
+    day: shifted.getUTCDate(),
+    weekday: shifted.getUTCDay(),
+    hour: shifted.getUTCHours(),
+    minute: shifted.getUTCMinutes(),
   };
 }
 
@@ -71,4 +84,66 @@ export function toZonedParts(date: Date): ZonedParts {
 export function currentYearMonth(now: Date = new Date()): string {
   const { year, month } = toZonedParts(now);
   return formatYearMonth(year, month);
+}
+
+/** "2026-01" shifted by -1 → "2025-12". */
+export function shiftYearMonth(ym: string, delta: number): string {
+  const parsed = parseYearMonth(ym);
+  if (!parsed) throw new Error(`Bulan tidak valid: ${ym}`);
+  const index = parsed.year * 12 + (parsed.month - 1) + delta;
+  return formatYearMonth(Math.floor(index / 12), (index % 12) + 1);
+}
+
+// ── Indonesian display helpers (no Intl, so output is identical everywhere) ──
+
+export const MONTH_NAMES = [
+  'Januari',
+  'Februari',
+  'Maret',
+  'April',
+  'Mei',
+  'Juni',
+  'Juli',
+  'Agustus',
+  'September',
+  'Oktober',
+  'November',
+  'Desember',
+] as const;
+
+export const WEEKDAY_NAMES = [
+  'Minggu',
+  'Senin',
+  'Selasa',
+  'Rabu',
+  'Kamis',
+  'Jumat',
+  'Sabtu',
+] as const;
+
+const pad = (n: number) => String(n).padStart(2, '0');
+
+/** "2026-10" → "Oktober 2026" */
+export function formatMonthLabel(ym: string): string {
+  const parsed = parseYearMonth(ym);
+  if (!parsed) return ym;
+  return `${MONTH_NAMES[parsed.month - 1]} ${parsed.year}`;
+}
+
+/** "Jumat, 30 Okt" */
+export function formatDayLabel(date: Date): string {
+  const p = toZonedParts(date);
+  return `${WEEKDAY_NAMES[p.weekday]}, ${p.day} ${MONTH_NAMES[p.month - 1]!.slice(0, 3)}`;
+}
+
+/** "30 Okt 2026" */
+export function formatDate(date: Date): string {
+  const p = toZonedParts(date);
+  return `${p.day} ${MONTH_NAMES[p.month - 1]!.slice(0, 3)} ${p.year}`;
+}
+
+/** "14:05" (WIB) */
+export function formatTime(date: Date): string {
+  const p = toZonedParts(date);
+  return `${pad(p.hour)}:${pad(p.minute)}`;
 }
