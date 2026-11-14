@@ -140,6 +140,16 @@ npx eas-cli@latest build --profile preview --platform android
 
 Buka link hasil build di HP, unduh dan pasang APK-nya.
 
+### Update aplikasi tanpa build ulang (EAS Update)
+
+Perubahan JavaScript (tampilan, teks, logika) dikirim langsung ke aplikasi:
+
+```bash
+npm run update:app -w @catetin/mobile -- -m "Pesan perubahan"
+```
+
+Aplikasi mengunduhnya saat dibuka; tutup lalu buka lagi untuk melihat versi baru. Build APK ulang hanya perlu bila menambah library native atau mengubah `version` di `app.json`.
+
 ## Update kode
 
 ```bash

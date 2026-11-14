@@ -7,7 +7,8 @@
     "start": "expo start",
     "android": "expo start --android",
     "typecheck": "tsc --noEmit",
-    "doctor": "expo-doctor"
+    "doctor": "expo-doctor",
+    "update:app": "EXPO_PUBLIC_API_URL=https://catetin.shrimpie.qzz.io npx eas-cli@latest update --channel preview --platform android"
   },
   "dependencies": {
     "@better-auth/expo": "^1.7.14",
@@ -27,6 +28,7 @@
     "expo-status-bar": "~58.0.4",
     "expo-symbols": "~58.0.4",
     "expo-system-ui": "~58.0.7",
+    "expo-updates": "~58.0.22",
     "hono": "^4.13.14",
     "lucide-react-native": "^1.65.0",
     "react": "19.3.0",
